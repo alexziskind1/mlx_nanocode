@@ -1,10 +1,6 @@
-# nanocode
+# mlx_nanocode
 
-Minimal Claude Code alternative. Single Python file, zero dependencies, ~250 lines.
-
-Built using Claude Code, then used to build itself.
-
-![screenshot](screenshot.png)
+Minimal Claude Code alternative with MLX.
 
 ## Features
 
@@ -12,11 +8,23 @@ Built using Claude Code, then used to build itself.
 - Tools: `read`, `write`, `edit`, `glob`, `grep`, `bash`
 - Conversation history
 - Colored terminal output
+- Runs locally with mlx-lm
 
 ## Usage
 
+### Install mlx-lm:
+
+pip install mlx-lm
+
+### Launch the server:
+
 ```bash
-export ANTHROPIC_API_KEY="your-key"
+mlx_lm.server --model mlx-community/NVIDIA-Nemotron-3-Nano-30B-A3B-4bit
+```
+
+### Run nanocode:
+
+```bash
 python nanocode.py
 ```
 

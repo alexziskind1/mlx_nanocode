@@ -1,19 +1,19 @@
-#!/usr/bin/env python3
 """nanocode - minimal claude code alternative"""
 
-import glob as globlib, json, os, re, subprocess, urllib.request
+import glob as globlib, json, os, re, subprocess, requests
 
-API_URL = "https://api.anthropic.com/v1/messages"
-MODEL = "claude-opus-4-5"
+API_URL = "http://localhost:8080/v1/chat/completions"
+MODEL = "default_model"
 
 # ANSI colors
 RESET, BOLD, DIM = "\033[0m", "\033[1m", "\033[2m"
-BLUE, CYAN, GREEN, YELLOW, RED = (
+BLUE, CYAN, GREEN, YELLOW, RED, GRAY = (
     "\033[34m",
     "\033[36m",
     "\033[32m",
     "\033[33m",
     "\033[31m",
+    "\x1b[90m",
 )
 
 
@@ -152,25 +152,20 @@ def make_schema():
 
 
 def call_api(messages, system_prompt):
-    request = urllib.request.Request(
+    response = requests.post(
         API_URL,
-        data=json.dumps(
-            {
-                "model": MODEL,
-                "max_tokens": 8192,
-                "system": system_prompt,
-                "messages": messages,
-                "tools": make_schema(),
-            }
-        ).encode(),
+        json={
+            "model": MODEL,
+            "max_tokens": 8192,
+            "system": system_prompt,
+            "messages": messages,
+            "tools": make_schema(),
+        },
         headers={
             "Content-Type": "application/json",
-            "x-api-key": os.environ.get("ANTHROPIC_API_KEY", ""),
-            "anthropic-version": "2023-06-01",
         },
     )
-    response = urllib.request.urlopen(request)
-    return json.loads(response.read())
+    return response.json()
 
 
 def separator():
@@ -205,43 +200,38 @@ def main():
             # agentic loop: keep calling API until no more tool calls
             while True:
                 response = call_api(messages, system_prompt)
-                content_blocks = response.get("content", [])
-                tool_results = []
+                block = response.get("choices", [{}])[0].get("message", [])
+                tool_result = ""
 
-                for block in content_blocks:
-                    if block["type"] == "text":
-                        print(f"\n{CYAN}⏺{RESET} {render_markdown(block['text'])}")
+                if reasoning := block.get("reasoning", False):
+                    print(f"\n{GRAY}{render_markdown(reasoning)}{RESET}")
+                if content := block.get("content", "").strip():
+                    print(f"\n{CYAN}⏺{RESET} {render_markdown(content)}")
 
-                    if block["type"] == "tool_use":
-                        tool_name = block["name"]
-                        tool_args = block["input"]
-                        arg_preview = str(list(tool_args.values())[0])[:50]
-                        print(
-                            f"\n{GREEN}⏺ {tool_name.capitalize()}{RESET}({DIM}{arg_preview}{RESET})"
-                        )
+                if tool_call := block.get("tool_calls", False):
+                    tool = tool_call[0]["function"]
+                    tool_name = tool["name"]
+                    tool_args = tool["arguments"]
+                    arg_preview = tool_args[:50]
+                    print(
+                        f"\n{GREEN}⏺ {tool_name.capitalize()}{RESET}({DIM}{arg_preview}{RESET})"
+                    )
 
-                        result = run_tool(tool_name, tool_args)
-                        result_lines = result.split("\n")
-                        preview = result_lines[0][:60]
-                        if len(result_lines) > 1:
-                            preview += f" ... +{len(result_lines) - 1} lines"
-                        elif len(result_lines[0]) > 60:
-                            preview += "..."
-                        print(f"  {DIM}⎿  {preview}{RESET}")
+                    result = run_tool(tool_name, json.loads(tool_args))
+                    result_lines = result.split("\n")
+                    preview = result_lines[0][:60]
+                    if len(result_lines) > 1:
+                        preview += f" ... +{len(result_lines) - 1} lines"
+                    elif len(result_lines[0]) > 60:
+                        preview += "..."
+                    print(f"  {DIM}⎿  {preview}{RESET}")
 
-                        tool_results.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": block["id"],
-                                "content": result,
-                            }
-                        )
+                    tool_result = result
+                    messages.append({"role": "tool", "content": tool_result})
 
-                messages.append({"role": "assistant", "content": content_blocks})
-
-                if not tool_results:
+                else:
+                    messages.append(block)
                     break
-                messages.append({"role": "user", "content": tool_results})
 
             print()
 
