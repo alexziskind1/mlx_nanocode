@@ -133,18 +133,21 @@ def make_schema():
             is_optional = param_type.endswith("?")
             base_type = param_type.rstrip("?")
             properties[param_name] = {
-                "type": "integer" if base_type == "number" else base_type
+                "type": "number" if base_type == "number" else base_type
             }
             if not is_optional:
                 required.append(param_name)
         result.append(
             {
-                "name": name,
-                "description": description,
-                "input_schema": {
-                    "type": "object",
-                    "properties": properties,
-                    "required": required,
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                    },
                 },
             }
         )
@@ -208,29 +211,56 @@ def main():
                 if content := block.get("content", "").strip():
                     print(f"\n{CYAN}⏺{RESET} {render_markdown(content)}")
 
-                if tool_call := block.get("tool_calls", False):
-                    tool = tool_call[0]["function"]
-                    tool_name = tool["name"]
-                    tool_args = tool["arguments"]
-                    arg_preview = tool_args[:50]
-                    print(
-                        f"\n{GREEN}⏺ {tool_name.capitalize()}{RESET}({DIM}{arg_preview}{RESET})"
+                tool_calls = block.get("tool_calls")
+                if tool_calls:
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": block.get("content"),
+                            "tool_calls": tool_calls,
+                        }
                     )
+                    for tool_call in tool_calls:
+                        tool = tool_call.get("function", {})
+                        tool_name = tool.get("name", "unknown")
+                        tool_args = tool.get("arguments", "")
+                        arg_preview = (
+                            tool_args[:50] if isinstance(tool_args, str) else str(tool_args)[:50]
+                        )
+                        print(
+                            f"\n{GREEN}⏺ {tool_name.capitalize()}{RESET}({DIM}{arg_preview}{RESET})"
+                        )
 
-                    result = run_tool(tool_name, json.loads(tool_args))
-                    result_lines = result.split("\n")
-                    preview = result_lines[0][:60]
-                    if len(result_lines) > 1:
-                        preview += f" ... +{len(result_lines) - 1} lines"
-                    elif len(result_lines[0]) > 60:
-                        preview += "..."
-                    print(f"  {DIM}⎿  {preview}{RESET}")
+                        try:
+                            parsed_args = (
+                                json.loads(tool_args)
+                                if isinstance(tool_args, str)
+                                else tool_args
+                            )
+                        except json.JSONDecodeError as err:
+                            result = f"error: invalid tool arguments ({err})"
+                        else:
+                            result = run_tool(tool_name, parsed_args)
 
-                    tool_result = result
-                    messages.append({"role": "tool", "content": tool_result})
+                        result_lines = result.split("\n")
+                        preview = result_lines[0][:60]
+                        if len(result_lines) > 1:
+                            preview += f" ... +{len(result_lines) - 1} lines"
+                        elif len(result_lines[0]) > 60:
+                            preview += "..."
+                        print(f"  {DIM}⎿  {preview}{RESET}")
+
+                        tool_result = result
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call.get("id"),
+                                "content": tool_result,
+                            }
+                        )
 
                 else:
-                    messages.append(block)
+                    messages.append({"role": "assistant", "content": block.get("content", "")})
                     break
 
             print()
