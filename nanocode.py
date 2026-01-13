@@ -163,12 +163,19 @@ def call_api(messages, system_prompt):
             "system": system_prompt,
             "messages": messages,
             "tools": make_schema(),
+            "tool_choice": "auto",
+            "parallel_tool_calls": False,
         },
         headers={
             "Content-Type": "application/json",
         },
     )
-    return response.json()
+    if not response.ok:
+        return {"error": f"{response.status_code} {response.text}"}
+    try:
+        return response.json()
+    except json.JSONDecodeError as err:
+        return {"error": f"invalid json response: {err}"}
 
 
 def separator():
@@ -182,7 +189,12 @@ def render_markdown(text):
 def main():
     print(f"{BOLD}nanocode{RESET} | {DIM}{MODEL} | {os.getcwd()}{RESET}\n")
     messages = []
-    system_prompt = f"Concise coding assistant. cwd: {os.getcwd()}"
+    system_prompt = (
+        "Concise coding assistant. Use tools when needed. "
+        "When calling tools, provide arguments as strict JSON with double quotes "
+        "and no trailing text. If you cannot provide valid JSON, respond without "
+        f"tool calls. cwd: {os.getcwd()}"
+    )
 
     while True:
         try:
@@ -203,6 +215,9 @@ def main():
             # agentic loop: keep calling API until no more tool calls
             while True:
                 response = call_api(messages, system_prompt)
+                if error := response.get("error"):
+                    print(f"\n{RED}⏺ API Error: {error}{RESET}")
+                    break
                 block = response.get("choices", [{}])[0].get("message", [])
                 tool_result = ""
 
